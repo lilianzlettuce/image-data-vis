@@ -31,11 +31,11 @@ host anywhere (GitHub Pages, Netlify, etc.).
 
 ## How it works
 
-**`scripts/preprocess.py`** runs on your machine, not in the browser. It:
+**`scripts/preprocess.py`** runs locally. It:
 
-- reads the EXIF capture time (and GPS, for later) and applies the EXIF rotation.
+- reads the EXIF capture time (and GPS) and applies the EXIF rotation.
   Photos with no EXIF date fall back to the file's modification time; the header
-  shows how many did.
+  shows how many.
 - lays every photo out on a shared **maximum canvas**. Each photo is scaled to a common
   short side and centered; the canvas is the largest width × largest height. Mixed
   portrait/landscape sets give a square canvas.

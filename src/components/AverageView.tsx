@@ -75,7 +75,10 @@ export function AverageView() {
 
   return (
     <div className="relative flex w-full h-full flex-col gap-2">
+      {/* Image canvas */}
       <canvas ref={canvasRef} className="average-canvas" />
+
+      {/* Status bar */}
       <div className="average-status">
         <StatusLine status={status} />
         <button

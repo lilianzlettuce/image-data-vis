@@ -27,7 +27,7 @@ export function App() {
         <p>
           Run{" "}
           <code className="rounded bg-surface px-1.5 py-0.5 text-foreground">
-            python scripts/preprocess.py /path/to/your/photos
+            python3 scripts/preprocess.py /path/to/your/photos
           </code>{" "}
           from the project folder, then reload.
         </p>
@@ -36,13 +36,13 @@ export function App() {
   }
 
   return (
-    <div className="grid h-full grid-rows-[auto_1fr_auto] bg-background font-sans text-foreground">
+    <div className="h-full flex flex-col bg-background font-sans text-foreground">
       <Header />
-      <div className="flex">
-        <main className="relative w-100 h-full min-h-0 px-5 pt-4 pb-2">
+      <div className="flex flex-grow">
+        <div className="relative w-160 h-full min-h-0 px-5 pt-4 pb-2">
           {manifest && <AverageView />}
-        </main>
-        <div className="border-t border-border px-5 pt-1 pb-4">
+        </div>
+        <div className="border-b border-border px-5 pt-1 pb-4">
           <Timeline />
         </div>
       </div>
