@@ -6,9 +6,16 @@
  * React renders the bars and labels; D3 provides scales, time intervals and
  * the brush interaction.
  */
-import * as d3 from 'd3';
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
-import { useStore } from '../store';
+import * as d3 from "d3";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type PointerEvent,
+} from "react";
+import { useStore } from "../store";
 
 const HEIGHT = 140;
 const M = { top: 10, right: 16, bottom: 26, left: 36 };
@@ -44,24 +51,56 @@ export function Timeline() {
   const model = useMemo(() => {
     if (!photos.length) return null;
     const t0 = d3.timeYear.floor(new Date(photos[0].time));
-    const t1 = d3.timeYear.offset(d3.timeYear.floor(new Date(photos[photos.length - 1].time)), 1);
-    const byMonth = d3.rollup(photos, (v) => v.length, (p) => +d3.timeMonth.floor(new Date(p.time)));
-    const byYear = d3.rollup(photos, (v) => v.length, (p) => +d3.timeYear.floor(new Date(p.time)));
+    const t1 = d3.timeYear.offset(
+      d3.timeYear.floor(new Date(photos[photos.length - 1].time)),
+      1,
+    );
+    const byMonth = d3.rollup(
+      photos,
+      (v) => v.length,
+      (p) => +d3.timeMonth.floor(new Date(p.time)),
+    );
+    const byYear = d3.rollup(
+      photos,
+      (v) => v.length,
+      (p) => +d3.timeYear.floor(new Date(p.time)),
+    );
     const months: Bin[] = d3.timeMonth
       .range(t0, t1)
-      .map((m) => ({ start: m, end: d3.timeMonth.offset(m, 1), count: byMonth.get(+m) ?? 0 }));
+      .map((m) => ({
+        start: m,
+        end: d3.timeMonth.offset(m, 1),
+        count: byMonth.get(+m) ?? 0,
+      }));
     const years: Bin[] = d3.timeYear
       .range(t0, t1)
-      .map((y) => ({ start: y, end: d3.timeYear.offset(y, 1), count: byYear.get(+y) ?? 0 }));
+      .map((y) => ({
+        start: y,
+        end: d3.timeYear.offset(y, 1),
+        count: byYear.get(+y) ?? 0,
+      }));
     return { t0, t1, months, years, max: d3.max(months, (b) => b.count) ?? 1 };
   }, [photos]);
 
   const x = useMemo(
-    () => (model ? d3.scaleTime().domain([model.t0, model.t1]).range([M.left, Math.max(M.left + 1, width - M.right)]) : null),
+    () =>
+      model
+        ? d3
+            .scaleTime()
+            .domain([model.t0, model.t1])
+            .range([M.left, Math.max(M.left + 1, width - M.right)])
+        : null,
     [model, width],
   );
   const y = useMemo(
-    () => (model ? d3.scaleLinear().domain([0, model.max]).nice().range([HEIGHT - M.bottom, M.top]) : null),
+    () =>
+      model
+        ? d3
+            .scaleLinear()
+            .domain([0, model.max])
+            .nice()
+            .range([HEIGHT - M.bottom, M.top])
+        : null,
     [model],
   );
 
@@ -70,16 +109,16 @@ export function Timeline() {
     const node = brushRef.current;
     if (!model || !x || !node || width <= 0) return;
     const g = d3.select<SVGGElement, unknown>(node);
-    const interval = snap === 'year' ? d3.timeYear : d3.timeMonth;
+    const interval = snap === "year" ? d3.timeYear : d3.timeMonth;
     const brush = d3
       .brushX<unknown>()
       .extent([
         [M.left, M.top],
         [width - M.right, HEIGHT - M.bottom],
       ])
-      .on('start brush end', (ev: d3.D3BrushEvent<unknown>) => {
+      .on("start brush end", (ev: d3.D3BrushEvent<unknown>) => {
         if (!ev.sourceEvent) return; // ignore programmatic moves
-        brushing.current = ev.type !== 'end';
+        brushing.current = ev.type !== "end";
         const sel = ev.selection as [number, number] | null;
         if (!sel) {
           setRange(null);
@@ -93,16 +132,16 @@ export function Timeline() {
         s = new Date(Math.max(+s, +model.t0));
         e = new Date(Math.min(+e, +model.t1));
         setRange([+s, +e]);
-        if (ev.type === 'end') g.call(brush.move, [x(s), x(e)]);
+        if (ev.type === "end") g.call(brush.move, [x(s), x(e)]);
       });
     g.call(brush);
     brushBehavior.current = brush;
     const r = useStore.getState().range;
     g.call(brush.move, r ? [x(r[0]), x(r[1])] : null);
     return () => {
-      brush.on('start brush end', null);
-      g.selectAll('*').remove();
-      g.on('.brush', null);
+      brush.on("start brush end", null);
+      g.selectAll("*").remove();
+      g.on(".brush", null);
       brushBehavior.current = null;
     };
   }, [model, x, width, snap, setRange]);
@@ -113,27 +152,43 @@ export function Timeline() {
     const brush = brushBehavior.current;
     if (!node || !brush || !x || brushing.current) return;
     const cur = d3.brushSelection(node) as [number, number] | null;
-    const target: [number, number] | null = range ? [x(range[0]), x(range[1])] : null;
+    const target: [number, number] | null = range
+      ? [x(range[0]), x(range[1])]
+      : null;
     if (!cur && !target) return;
-    if (cur && target && Math.abs(cur[0] - target[0]) < 0.5 && Math.abs(cur[1] - target[1]) < 0.5) return;
+    if (
+      cur &&
+      target &&
+      Math.abs(cur[0] - target[0]) < 0.5 &&
+      Math.abs(cur[1] - target[1]) < 0.5
+    )
+      return;
     d3.select<SVGGElement, unknown>(node).call(brush.move, target);
   }, [range, x]);
 
-  if (!model || !x || !y) return <div ref={wrapRef} className="timeline" />;
+  if (!model || !x || !y)
+    return (
+      <div
+        ref={wrapRef}
+        className="timeline"
+      />
+    );
 
-  const inRange = (b: Bin) => !range || (+b.start >= range[0] && +b.end <= range[1]);
+  const inRange = (b: Bin) =>
+    !range || (+b.start >= range[0] && +b.end <= range[1]);
 
   const selectYear = (yr: Bin, extend: boolean) => {
-    if (extend && range) setRange([Math.min(range[0], +yr.start), Math.max(range[1], +yr.end)]);
+    if (extend && range)
+      setRange([Math.min(range[0], +yr.start), Math.max(range[1], +yr.end)]);
     else setRange([+yr.start, +yr.end]);
   };
 
   const onKeyDown = (e: KeyboardEvent) => {
-    if (e.key === 'Escape') return setRange(null);
-    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    if (e.key === "Escape") return setRange(null);
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
     e.preventDefault();
-    const interval = snap === 'year' ? d3.timeYear : d3.timeMonth;
-    const step = e.key === 'ArrowLeft' ? -1 : 1;
+    const interval = snap === "year" ? d3.timeYear : d3.timeMonth;
+    const step = e.key === "ArrowLeft" ? -1 : 1;
     const [s, en] = range ?? [+model.t0, +interval.offset(model.t0, 1)];
     const ns = interval.offset(new Date(s), step);
     const ne = interval.offset(new Date(en), step);
@@ -146,52 +201,107 @@ export function Timeline() {
     const px = e.clientX - rect.left;
     const t = x.invert(px);
     const bin = model.months.find((b) => t >= b.start && t < b.end);
-    setHover(bin && px >= M.left && px <= width - M.right ? { x: px, bin } : null);
+    setHover(
+      bin && px >= M.left && px <= width - M.right ? { x: px, bin } : null,
+    );
   };
 
-  const fmtMonth = d3.timeFormat('%B %Y');
+  const fmtMonth = d3.timeFormat("%B %Y");
   const total = photos.length;
 
   return (
     <div className="timeline-block">
-      <div className="year-buttons" role="group" aria-label="Select a year">
-        <button className={`chip ${range ? '' : 'active'}`} onClick={() => setRange(null)}>
-          All <span className="chip-count">{total}</span>
+      <div
+        className="year-buttons"
+        role="group"
+        aria-label="Select a year"
+      >
+        <button
+          className={`chip ${range ? "" : "active"}`}
+          onClick={() => setRange(null)}
+        >
+          All           <span className="chip-count">{total}</span>
         </button>
         {model.years.map((yr) => (
           <button
             key={+yr.start}
-            className={`chip ${range && inRange(yr) ? 'active' : ''}`}
+            className={`chip ${range && inRange(yr) ? "active" : ""}`}
             disabled={yr.count === 0}
             onClick={(e) => selectYear(yr, e.shiftKey)}
             title="Click to select · Shift-click to extend"
           >
-            {yr.start.getFullYear()} <span className="chip-count">{yr.count}</span>
+            {yr.start.getFullYear()}{" "}
+            <span className="chip-count">{yr.count}</span>
           </button>
         ))}
-        <span className="hint">Drag on the timeline to brush · ←/→ to step · Esc for all</span>
+        <span className="hint">
+          Drag on the timeline to brush · ←/→ to step · Esc for all
+        </span>
       </div>
 
-      <div ref={wrapRef} className="timeline" tabIndex={0} onKeyDown={onKeyDown} aria-label="Timeline of photos per month">
-        <svg width={width} height={HEIGHT} onPointerMove={onPointerMove} onPointerLeave={() => setHover(null)}>
+      <div
+        ref={wrapRef}
+        className="timeline"
+        tabIndex={0}
+        onKeyDown={onKeyDown}
+        aria-label="Timeline of photos per month"
+      >
+        <svg
+          width={width}
+          height={HEIGHT}
+          onPointerMove={onPointerMove}
+          onPointerLeave={() => setHover(null)}
+        >
           {/* recessive grid: one baseline + year dividers */}
-          <line className="axis-line" x1={M.left} x2={width - M.right} y1={y(0)} y2={y(0)} />
+          <line
+            className="axis-line"
+            x1={M.left}
+            x2={width - M.right}
+            y1={y(0)}
+            y2={y(0)}
+          />
           {model.years.map((yr) => (
             <g key={+yr.start}>
-              <line className="year-divider" x1={x(yr.start)} x2={x(yr.start)} y1={M.top} y2={HEIGHT - M.bottom + 4} />
-              <text className="axis-label" x={(x(yr.start) + x(yr.end)) / 2} y={HEIGHT - 8} textAnchor="middle">
+              <line
+                className="year-divider"
+                x1={x(yr.start)}
+                x2={x(yr.start)}
+                y1={M.top}
+                y2={HEIGHT - M.bottom + 4}
+              />
+              <text
+                className="axis-label"
+                x={(x(yr.start) + x(yr.end)) / 2}
+                y={HEIGHT - 8}
+                textAnchor="middle"
+              >
                 {yr.start.getFullYear()}
               </text>
             </g>
           ))}
-          {y.ticks(3).filter((t) => t > 0 && Number.isInteger(t)).map((t) => (
-            <g key={t}>
-              <line className="grid-line" x1={M.left} x2={width - M.right} y1={y(t)} y2={y(t)} />
-              <text className="axis-label" x={M.left - 6} y={y(t)} dy="0.32em" textAnchor="end">
-                {t}
-              </text>
-            </g>
-          ))}
+          {y
+            .ticks(3)
+            .filter((t) => t > 0 && Number.isInteger(t))
+            .map((t) => (
+              <g key={t}>
+                <line
+                  className="grid-line"
+                  x1={M.left}
+                  x2={width - M.right}
+                  y1={y(t)}
+                  y2={y(t)}
+                />
+                <text
+                  className="axis-label"
+                  x={M.left - 6}
+                  y={y(t)}
+                  dy="0.32em"
+                  textAnchor="end"
+                >
+                  {t}
+                </text>
+              </g>
+            ))}
           {model.months.map((b) => {
             if (!b.count) return null;
             const x0 = x(b.start) + 1;
@@ -200,7 +310,9 @@ export function Timeline() {
             return (
               <path
                 key={+b.start}
-                className={`bar ${inRange(b) ? 'bar-on' : 'bar-off'} ${hover?.bin === b ? 'bar-hover' : ''}`}
+                className={`bar ${inRange(b) ? "bar-on" : "bar-off"} ${
+                  hover?.bin === b ? "bar-hover" : ""
+                }`}
                 d={roundedTop(x0, top, w, y(0) - top, Math.min(4, w / 2))}
               />
             );
@@ -208,10 +320,13 @@ export function Timeline() {
           <g ref={brushRef} className="brush" />
         </svg>
         {hover && (
-          <div className="tooltip" style={{ left: hover.x, top: 0 }}>
+          <div
+            className="tooltip"
+            style={{ left: hover.x }}
+          >
             <strong>{fmtMonth(hover.bin.start)}</strong>
             <span>
-              {hover.bin.count} photo{hover.bin.count === 1 ? '' : 's'}
+              {hover.bin.count} photo{hover.bin.count === 1 ? "" : "s"}
             </span>
           </div>
         )}
@@ -221,7 +336,13 @@ export function Timeline() {
 }
 
 /** Bar path with rounded top corners, square at the baseline. */
-function roundedTop(x: number, y: number, w: number, h: number, r: number): string {
+function roundedTop(
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number,
+): string {
   r = Math.max(0, Math.min(r, h));
   return `M${x},${y + h}V${y + r}Q${x},${y} ${x + r},${y}H${x + w - r}Q${x + w},${y} ${x + w},${y + r}V${y + h}Z`;
 }
