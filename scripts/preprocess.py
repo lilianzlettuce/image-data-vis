@@ -14,11 +14,12 @@ It writes everything the site needs into public/data/:
     public/data/atlas-<n>.jpg      small copies packed into big sheets
                                    (the live-preview tier, loaded once onto the GPU)
 
-Layout ("maximum canvas"): every photo is scaled so its short side matches the
-median short side of the collection, then centered on a shared canvas whose
-size is the largest width x largest height of any scaled photo. Areas a photo
-doesn't cover are treated as transparent by the web app, so each pixel of the
-average only includes the photos that actually cover it.
+Layout ("bounding box"): every photo is scaled to fit inside one shared box,
+touching it on one axis and centered on the other, so nothing sticks out. The
+box defaults to the most common photo size in the collection (set it with
+--box 3000x4000). Areas a photo doesn't cover are treated as transparent by
+the web app, so each pixel of the average only includes the photos that
+actually cover it.
 
 Requires: Pillow (pip install pillow). For iPhone HEIC files also:
 pip install pillow-heif
@@ -31,14 +32,15 @@ import hashlib
 import json
 import os
 import shutil
-import statistics
+from collections import Counter
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 from PIL import ExifTags, Image, ImageFile, ImageOps
 
-# Keep files that are a few bytes short
+# Some cameras/phones/exports leave a file a few bytes short. Pillow refuses those by
+# default; the picture is almost always intact, so load what's there.
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 try:  # optional HEIC/HEIF support
@@ -191,6 +193,9 @@ def main() -> int:
                     help="long side of the live-preview canvas in px (default 512)")
     ap.add_argument("--hires-long", type=int, default=2000,
                     help="long side of the high-res canvas in px (default 2000)")
+    ap.add_argument("--box", default=None,
+                    help="bounding box every photo is fitted inside, e.g. 3000x4000 "
+                         "(default: the most common photo size in the collection)")
     ap.add_argument("--atlas-size", type=int, default=4096, help="atlas sheet size in px (default 4096)")
     ap.add_argument("--quality", type=int, default=90, help="JPEG quality for outputs (default 90)")
     ap.add_argument("--hires-format", choices=["jpg", "png", "webp"], default="jpg",
@@ -225,14 +230,22 @@ def main() -> int:
         print("No readable photos.", file=sys.stderr)
         return 1
 
-    # ---- layout on the shared "maximum" canvas ----------------------------- #
-    ref_short = statistics.median(min(e["size"]) for e in entries)
+    # ---- layout: every photo fits inside one bounding box --------------------- #
+    # The box is the most common (upright) photo size in the collection, unless
+    # --box is given. Each photo is scaled so it touches the box on one axis and
+    # fits inside on the other ("contain"), then centered.
+    if args.box:
+        try:
+            canvas_w, canvas_h = (float(v) for v in args.box.lower().split("x"))
+        except ValueError:
+            print(f"--box must look like 3000x4000, got {args.box!r}", file=sys.stderr)
+            return 1
+    else:
+        canvas_w, canvas_h = Counter(e["size"] for e in entries).most_common(1)[0][0]
     for e in entries:
         w, h = e["size"]
-        s = ref_short / min(w, h)
+        s = min(canvas_w / w, canvas_h / h)
         e["scaled"] = (w * s, h * s)
-    canvas_w = max(e["scaled"][0] for e in entries)
-    canvas_h = max(e["scaled"][1] for e in entries)
     canvas_long = max(canvas_w, canvas_h)
 
     def tier_dims(long_side: int) -> tuple[float, int, int]:
