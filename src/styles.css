@@ -196,20 +196,6 @@ button {
   cursor: default;
 }
 
-.timeline-block {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding-top: 10px;
-}
-
-.year-buttons {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-}
-
 .chip {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -239,19 +225,6 @@ button {
 .chip-count {
   opacity: 0.65;
   margin-left: 2px;
-}
-
-.hint {
-  margin-left: auto;
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.timeline {
-  position: relative;
-  width: 60%;
-  border-radius: 6px;
-  outline: none;
 }
 
 .timeline:focus-visible {

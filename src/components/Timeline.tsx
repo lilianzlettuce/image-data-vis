@@ -1,10 +1,8 @@
 /**
- * Timeline: photos per month as bars, with a brush that snaps to whole years
- * (or months). Dragging the brush updates the shared selection live; the
- * average view follows it.
+ * Timeline: photos per month as bars, brush snaps to whole years/months
+ * Dragging brush updates shared selection live; average view follows it.
  *
- * React renders the bars and labels; D3 provides scales, time intervals and
- * the brush interaction.
+ * React renders bars and labels; D3 provides scales, time intervals and brush interaction
  */
 import * as d3 from "d3";
 import {
@@ -17,8 +15,8 @@ import {
 } from "react";
 import { useStore } from "../store";
 
-const HEIGHT = 140;
-const M = { top: 10, right: 16, bottom: 26, left: 36 };
+const HEIGHT = 120; // height of bar chart, including axis and labels
+const M = { top: 10, right: 16, bottom: 26, left: 36 }; // margins for axis and labels
 
 interface Bin {
   start: Date;
@@ -47,7 +45,7 @@ export function Timeline() {
     return () => ro.disconnect();
   }, []);
 
-  // Monthly bins and yearly totals over whole years spanning the data.
+  // Monthly bins and yearly totals over whole years spanning the data
   const model = useMemo(() => {
     if (!photos.length) return null;
     const t0 = d3.timeYear.floor(new Date(photos[0].time));
@@ -65,20 +63,16 @@ export function Timeline() {
       (v) => v.length,
       (p) => +d3.timeYear.floor(new Date(p.time)),
     );
-    const months: Bin[] = d3.timeMonth
-      .range(t0, t1)
-      .map((m) => ({
-        start: m,
-        end: d3.timeMonth.offset(m, 1),
-        count: byMonth.get(+m) ?? 0,
-      }));
-    const years: Bin[] = d3.timeYear
-      .range(t0, t1)
-      .map((y) => ({
-        start: y,
-        end: d3.timeYear.offset(y, 1),
-        count: byYear.get(+y) ?? 0,
-      }));
+    const months: Bin[] = d3.timeMonth.range(t0, t1).map((m) => ({
+      start: m,
+      end: d3.timeMonth.offset(m, 1),
+      count: byMonth.get(+m) ?? 0,
+    }));
+    const years: Bin[] = d3.timeYear.range(t0, t1).map((y) => ({
+      start: y,
+      end: d3.timeYear.offset(y, 1),
+      count: byYear.get(+y) ?? 0,
+    }));
     return { t0, t1, months, years, max: d3.max(months, (b) => b.count) ?? 1 };
   }, [photos]);
 
@@ -104,7 +98,7 @@ export function Timeline() {
     [model],
   );
 
-  // D3 brush, snapping to the chosen interval.
+  // D3 brush, snapping to the chosen interval
   useEffect(() => {
     const node = brushRef.current;
     if (!model || !x || !node || width <= 0) return;
@@ -146,7 +140,7 @@ export function Timeline() {
     };
   }, [model, x, width, snap, setRange]);
 
-  // Keep the brush in sync when the range changes from elsewhere (year buttons, keys).
+  // Keep the brush in sync when the range changes from elsewhere (year buttons, keys)
   useEffect(() => {
     const node = brushRef.current;
     const brush = brushBehavior.current;
@@ -166,13 +160,7 @@ export function Timeline() {
     d3.select<SVGGElement, unknown>(node).call(brush.move, target);
   }, [range, x]);
 
-  if (!model || !x || !y)
-    return (
-      <div
-        ref={wrapRef}
-        className="timeline"
-      />
-    );
+  if (!model || !x || !y) return <div ref={wrapRef} className="timeline" />;
 
   const inRange = (b: Bin) =>
     !range || (+b.start >= range[0] && +b.end <= range[1]);
@@ -210,9 +198,10 @@ export function Timeline() {
   const total = photos.length;
 
   return (
-    <div className="timeline-block">
+    <div className="flex flex-col gap-2 pt-2.5">
+      {/* Year filter buttons */}
       <div
-        className="year-buttons"
+        className="flex flex-wrap gap-1.5"
         role="group"
         aria-label="Select a year"
       >
@@ -220,28 +209,29 @@ export function Timeline() {
           className={`chip ${range ? "" : "active"}`}
           onClick={() => setRange(null)}
         >
-          All           <span className="chip-count">{total}</span>
+          All <span className="chip-count">{total}</span>
         </button>
-        {model.years.map((yr) => (
+        {model.years.map((year) => (
           <button
-            key={+yr.start}
-            className={`chip ${range && inRange(yr) ? "active" : ""}`}
-            disabled={yr.count === 0}
-            onClick={(e) => selectYear(yr, e.shiftKey)}
+            key={+year.start}
+            className={`chip ${range && inRange(year) ? "active" : ""}`}
+            disabled={year.count === 0}
+            onClick={(e) => selectYear(year, e.shiftKey)}
             title="Click to select · Shift-click to extend"
           >
-            {yr.start.getFullYear()}{" "}
-            <span className="chip-count">{yr.count}</span>
+            {year.start.getFullYear()}{" "}
+            <span className="chip-count">{year.count}</span>
           </button>
         ))}
-        <span className="hint">
-          Drag on the timeline to brush · ←/→ to step · Esc for all
+        <span className="ml-auto text-muted text-xs tabular-nums">
+          Drag on the timeline to select time period · ←/→ to step · Esc for all
         </span>
       </div>
 
+      {/* Timeline chart of number of photos over time */}
       <div
         ref={wrapRef}
-        className="timeline"
+        className="relative w-full rounded-sm outline-none focus-within:ring-2 focus-within:ring-muted"
         tabIndex={0}
         onKeyDown={onKeyDown}
         aria-label="Timeline of photos per month"
@@ -320,10 +310,7 @@ export function Timeline() {
           <g ref={brushRef} className="brush" />
         </svg>
         {hover && (
-          <div
-            className="tooltip"
-            style={{ left: hover.x }}
-          >
+          <div className="tooltip" style={{ left: hover.x }}>
             <strong>{fmtMonth(hover.bin.start)}</strong>
             <span>
               {hover.bin.count} photo{hover.bin.count === 1 ? "" : "s"}
@@ -335,7 +322,8 @@ export function Timeline() {
   );
 }
 
-/** Bar path with rounded top corners, square at the baseline. */
+/** Get SVG path to draw bar for a bin on the chart
+ *  Rounded top corners, square at the baseline */
 function roundedTop(
   x: number,
   y: number,
