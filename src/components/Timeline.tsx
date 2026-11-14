@@ -45,13 +45,23 @@ export function Timeline() {
     return () => ro.disconnect();
   }, []);
 
-  // Monthly bins and yearly totals over whole years spanning the data
+  // Monthly and yearly image count bins over the time range spanning the data
   const model = useMemo(() => {
     if (!photos.length) return null;
+
+    // Get first and last year boundaries
     const t0 = d3.timeYear.floor(new Date(photos[0].time));
     const t1 = d3.timeYear.offset(
       d3.timeYear.floor(new Date(photos[photos.length - 1].time)),
       1,
+    );
+
+    // Count photos per time interval (week/month/year)
+    // Gets maps with keys: month/year start date in ms, values: photo counts
+    const byWeek = d3.rollup(
+      photos,
+      (v) => v.length,
+      (p) => +d3.timeWeek.floor(new Date(p.time)),
     );
     const byMonth = d3.rollup(
       photos,
@@ -63,19 +73,38 @@ export function Timeline() {
       (v) => v.length,
       (p) => +d3.timeYear.floor(new Date(p.time)),
     );
-    const months: Bin[] = d3.timeMonth.range(t0, t1).map((m) => ({
-      start: m,
-      end: d3.timeMonth.offset(m, 1),
-      count: byMonth.get(+m) ?? 0,
-    }));
-    const years: Bin[] = d3.timeYear.range(t0, t1).map((y) => ({
-      start: y,
-      end: d3.timeYear.offset(y, 1),
-      count: byYear.get(+y) ?? 0,
-    }));
-    return { t0, t1, months, years, max: d3.max(months, (b) => b.count) ?? 1 };
-  }, [photos]);
 
+    // Create image count bins for each time interval
+    // Gets arrays of {start, end, count} Bin objects
+    const weeks: Bin[] = d3.timeWeek.range(t0, t1).map((week) => ({
+      start: week,
+      end: d3.timeWeek.offset(week, 1),
+      count: byWeek.get(+week) ?? 0,
+    }));
+    const months: Bin[] = d3.timeMonth.range(t0, t1).map((month) => ({
+      start: month,
+      end: d3.timeMonth.offset(month, 1),
+      count: byMonth.get(+month) ?? 0,
+    }));
+    const years: Bin[] = d3.timeYear.range(t0, t1).map((year) => ({
+      start: year,
+      end: d3.timeYear.offset(year, 1),
+      count: byYear.get(+year) ?? 0,
+    }));
+    return {
+      t0, // start of timeline
+      t1, // end
+      weeks, // week bins for week bars
+      months, // month bins for bars (default)
+      years, // year bins for buttons and labels/dividers
+      max:
+        snap === "month"
+          ? (d3.max(months, (b) => b.count) ?? 1)
+          : (d3.max(weeks, (b) => b.count) ?? 1), // tallest bar -> top of the y axis
+    };
+  }, [photos, snap]);
+
+  // D3 scales for x (time) and y (count)
   const x = useMemo(
     () =>
       model
@@ -102,8 +131,15 @@ export function Timeline() {
   useEffect(() => {
     const node = brushRef.current;
     if (!model || !x || !node || width <= 0) return;
+
+    // Brush interaction: update selection in store when user drags
     const g = d3.select<SVGGElement, unknown>(node);
-    const interval = snap === "year" ? d3.timeYear : d3.timeMonth;
+    const interval =
+      snap === "year"
+        ? d3.timeYear
+        : snap === "month"
+          ? d3.timeMonth
+          : d3.timeWeek;
     const brush = d3
       .brushX<unknown>()
       .extent([
@@ -118,6 +154,8 @@ export function Timeline() {
           setRange(null);
           return;
         }
+
+        // Snap the selection to whole years/months and update the store
         const a = x.invert(sel[0]);
         const b = x.invert(sel[1]);
         let s = interval.floor(a);
@@ -128,6 +166,8 @@ export function Timeline() {
         setRange([+s, +e]);
         if (ev.type === "end") g.call(brush.move, [x(s), x(e)]);
       });
+
+    // Render brush and move it to current selection
     g.call(brush);
     brushBehavior.current = brush;
     const r = useStore.getState().range;
@@ -140,15 +180,19 @@ export function Timeline() {
     };
   }, [model, x, width, snap, setRange]);
 
-  // Keep the brush in sync when the range changes from elsewhere (year buttons, keys)
+  // Keep brush in sync when the range changes from elsewhere (year buttons, keys)
   useEffect(() => {
     const node = brushRef.current;
     const brush = brushBehavior.current;
     if (!node || !brush || !x || brushing.current) return;
+
+    // Get current and target brush selections in pixels
     const cur = d3.brushSelection(node) as [number, number] | null;
     const target: [number, number] | null = range
       ? [x(range[0]), x(range[1])]
       : null;
+
+    // Return if no current and target selections or they're within 0.5px of each other (avoids infinite loop)
     if (!cur && !target) return;
     if (
       cur &&
@@ -160,11 +204,14 @@ export function Timeline() {
     d3.select<SVGGElement, unknown>(node).call(brush.move, target);
   }, [range, x]);
 
+  // Return early if no data or scales yet
   if (!model || !x || !y) return <div ref={wrapRef} className="timeline" />;
 
+  // Helper to check if a bin is fully within the current selection range
   const inRange = (b: Bin) =>
     !range || (+b.start >= range[0] && +b.end <= range[1]);
 
+  // Helper to select a year, optionally extending the current selection
   const selectYear = (yr: Bin, extend: boolean) => {
     if (extend && range)
       setRange([Math.min(range[0], +yr.start), Math.max(range[1], +yr.end)]);
@@ -175,7 +222,12 @@ export function Timeline() {
     if (e.key === "Escape") return setRange(null);
     if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
     e.preventDefault();
-    const interval = snap === "year" ? d3.timeYear : d3.timeMonth;
+    const interval =
+      snap === "year"
+        ? d3.timeYear
+        : snap === "month"
+          ? d3.timeMonth
+          : d3.timeWeek;
     const step = e.key === "ArrowLeft" ? -1 : 1;
     const [s, en] = range ?? [+model.t0, +interval.offset(model.t0, 1)];
     const ns = interval.offset(new Date(s), step);
@@ -292,21 +344,38 @@ export function Timeline() {
                 </text>
               </g>
             ))}
-          {model.months.map((b) => {
-            if (!b.count) return null;
-            const x0 = x(b.start) + 1;
-            const w = Math.max(1, x(b.end) - x(b.start) - 2); // 2px gap between bars
-            const top = y(b.count);
-            return (
-              <path
-                key={+b.start}
-                className={`bar ${inRange(b) ? "bar-on" : "bar-off"} ${
-                  hover?.bin === b ? "bar-hover" : ""
-                }`}
-                d={roundedTop(x0, top, w, y(0) - top, Math.min(4, w / 2))}
-              />
-            );
-          })}
+          {/* Bars for each month/week */}
+          {snap === "week"
+            ? model.weeks.map((b) => {
+                if (!b.count) return null;
+                const x0 = x(b.start) + 1;
+                const w = Math.max(1, x(b.end) - x(b.start) - 2); // 2px gap between bars
+                const top = y(b.count);
+                return (
+                  <path
+                    key={+b.start}
+                    className={`bar ${inRange(b) ? "bar-on" : "bar-off"} ${
+                      hover?.bin === b ? "bar-hover" : ""
+                    }`}
+                    d={drawBarSVG(x0, top, w, y(0) - top, Math.min(4, w / 2))}
+                  />
+                );
+              })
+            : model.months.map((b) => {
+                if (!b.count) return null;
+                const x0 = x(b.start) + 1;
+                const w = Math.max(1, x(b.end) - x(b.start) - 1); // 1px gap between bars
+                const top = y(b.count);
+                return (
+                  <path
+                    key={+b.start}
+                    className={`bar ${inRange(b) ? "bar-on" : "bar-off"} ${
+                      hover?.bin === b ? "bar-hover" : ""
+                    }`}
+                    d={drawBarSVG(x0, top, w, y(0) - top, Math.min(4, w / 2))}
+                  />
+                );
+              })}
           <g ref={brushRef} className="brush" />
         </svg>
         {hover && (
@@ -324,7 +393,7 @@ export function Timeline() {
 
 /** Get SVG path to draw bar for a bin on the chart
  *  Rounded top corners, square at the baseline */
-function roundedTop(
+function drawBarSVG(
   x: number,
   y: number,
   w: number,

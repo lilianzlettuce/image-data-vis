@@ -6,10 +6,10 @@
  * To add a new kind of filter: add a field + setter, and include it in
  * computeSelection().
  */
-import { create } from 'zustand';
-import type { Manifest, PhotoItem } from './types';
+import { create } from "zustand";
+import type { Manifest, PhotoItem } from "./types";
 
-export type Snap = 'year' | 'month';
+export type Snap = "year" | "month" | "week";
 
 interface State {
   manifest: Manifest | null;
@@ -27,7 +27,10 @@ interface State {
   setLinear: (b: boolean) => void;
 }
 
-function computeSelection(photos: PhotoItem[], range: State['range']): PhotoItem[] {
+function computeSelection(
+  photos: PhotoItem[],
+  range: State["range"],
+): PhotoItem[] {
   if (!range) return photos;
   const [a, b] = range;
   return photos.filter((p) => p.time >= a && p.time < b);
@@ -37,7 +40,7 @@ export const useStore = create<State>()((set, get) => ({
   manifest: null,
   photos: [],
   range: null,
-  snap: 'year',
+  snap: "year",
   linear: false,
   selected: [],
 
@@ -51,7 +54,11 @@ export const useStore = create<State>()((set, get) => ({
 
   setRange: (range) => {
     const cur = get().range;
-    if (cur === range || (cur && range && cur[0] === range[0] && cur[1] === range[1])) return;
+    if (
+      cur === range ||
+      (cur && range && cur[0] === range[0] && cur[1] === range[1])
+    )
+      return;
     set({ range, selected: computeSelection(get().photos, range) });
   },
 

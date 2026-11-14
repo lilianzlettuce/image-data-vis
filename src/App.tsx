@@ -79,13 +79,13 @@ function Header() {
       <div className="flex flex-wrap items-center gap-4">
         <div className="segmented" role="group" aria-label="Brush snaps to">
           <span className="label">Snap</span>
-          {(["year", "month"] as const).map((s) => (
+          {(["year", "month", "week"] as const).map((s) => (
             <button
               key={s}
               className={snap === s ? "active" : ""}
               onClick={() => setSnap(s)}
             >
-              {s === "year" ? "Year" : "Month"}
+              {s === "year" ? "Year" : s === "month" ? "Month" : "Week"}
             </button>
           ))}
         </div>
