@@ -24,32 +24,48 @@ interface Bin {
   count: number;
 }
 
+interface Hover {
+  x: number; // pixel position of mouse
+  bin: Bin; // hovered month/week bin
+}
+
 export function Timeline() {
-  const photos = useStore((s) => s.photos);
-  const range = useStore((s) => s.range);
-  const snap = useStore((s) => s.snap);
+  /* Shared global state */
+  const photos = useStore((s) => s.photos); // all photos sorted by time
+  const range = useStore((s) => s.range); // current selection [startMs, endMs), (null = all)
+  const snap = useStore((s) => s.snap); // what the brush snaps to (year, month, week)
   const setRange = useStore((s) => s.setRange);
 
-  const wrapRef = useRef<HTMLDivElement>(null);
-  const brushRef = useRef<SVGGElement>(null);
+  /* Refs */
+  const wrapRef = useRef<HTMLDivElement>(null); // chart container for measuring width
+
+  const brushRef = useRef<SVGGElement>(null); // D3 brush group
   const brushBehavior = useRef<d3.BrushBehavior<unknown> | null>(null);
   const brushing = useRef(false);
-  const [width, setWidth] = useState(0);
-  const [hover, setHover] = useState<{ x: number; bin: Bin } | null>(null);
 
+  /* Local state */
+  const [width, setWidth] = useState(0); // chart container width, updated on resize
+  const [hover, setHover] = useState<Hover | null>(null); // hovered pos & bin for tooltip
+
+  // Measure container's width whenever it resizes so the chart always fills available width
   useEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
     const ro = new ResizeObserver(([e]) => setWidth(e.contentRect.width));
     ro.observe(el);
+
+    // Disconnect observer on unmount
     return () => ro.disconnect();
   }, []);
 
-  // Monthly and yearly image count bins over the time range spanning the data
+  /*
+   * Get timeline data from the photo list
+   * Returns monthly and yearly image count bins over the time range spanning the data
+   */
   const model = useMemo(() => {
     if (!photos.length) return null;
 
-    // Get first and last year boundaries
+    // Get first and last year boundaries (Jan 1 of first year, Jan 1 of year after last year)
     const t0 = d3.timeYear.floor(new Date(photos[0].time));
     const t1 = d3.timeYear.offset(
       d3.timeYear.floor(new Date(photos[photos.length - 1].time)),
@@ -57,7 +73,8 @@ export function Timeline() {
     );
 
     // Count photos per time interval (week/month/year)
-    // Gets maps with keys: month/year start date in ms, values: photo counts
+    // Resulting maps: Map { monthStartMs -> count }
+    // Keys: month/year start date in ms, values: photo counts
     const byWeek = d3.rollup(
       photos,
       (v) => v.length,
@@ -98,41 +115,52 @@ export function Timeline() {
       months, // month bins for bars (default)
       years, // year bins for buttons and labels/dividers
       max:
-        snap === "month"
-          ? (d3.max(months, (b) => b.count) ?? 1)
-          : (d3.max(weeks, (b) => b.count) ?? 1), // tallest bar -> top of the y axis
+        snap === "week"
+          ? (d3.max(weeks, (b) => b.count) ?? 1)
+          : (d3.max(months, (b) => b.count) ?? 1), // tallest bar -> top of the y axis
     };
   }, [photos, snap]);
 
-  // D3 scales for x (time) and y (count)
-  const x = useMemo(
+  /*
+   * D3 scale functions for converting data values to pixel positions
+   * xScale(date) -> horizontal pixel; xScale.invert(pixel) -> date (used by the brush/hover)
+   * yScale(count) -> vertical pixel
+   */
+
+  // Converts time to pixel position along x axis
+  const xScale = useMemo(
     () =>
       model
         ? d3
             .scaleTime()
-            .domain([model.t0, model.t1])
-            .range([M.left, Math.max(M.left + 1, width - M.right)])
+            .domain([model.t0, model.t1]) // input: time span
+            .range([M.left, Math.max(M.left + 1, width - M.right)]) // output: plot's left..right edge
         : null,
     [model, width],
   );
-  const y = useMemo(
+  // Converts count to pixel position along y axis
+  const yScale = useMemo(
     () =>
       model
         ? d3
             .scaleLinear()
-            .domain([0, model.max])
-            .nice()
-            .range([HEIGHT - M.bottom, M.top])
+            .domain([0, model.max]) // input: 0..tallest bar
+            .nice() // round to nice round number (e.g. 37 -> 40)
+            .range([HEIGHT - M.bottom, M.top]) // output: bottom..top of plot
         : null,
     [model],
   );
 
-  // D3 brush, snapping to the chosen interval
+  /*
+   * D3 brush, snapping to the chosen interval
+   * Runs after React has rendered the empty <g ref={brushRef}>
+   * D3 adds invisible overlay rect (catches mouse drags), visible selection rect, and resize handles
+   */
   useEffect(() => {
     const node = brushRef.current;
-    if (!model || !x || !node || width <= 0) return;
+    if (!model || !xScale || !node || width <= 0) return;
 
-    // Brush interaction: update selection in store when user drags
+    // Create brush interaction: update selection in store when user drags
     const g = d3.select<SVGGElement, unknown>(node);
     const interval =
       snap === "year"
@@ -141,55 +169,75 @@ export function Timeline() {
           ? d3.timeMonth
           : d3.timeWeek;
     const brush = d3
-      .brushX<unknown>()
+      .brushX<unknown>() // horizontal-only brush
       .extent([
+        // set the plot area you can brush in
         [M.left, M.top],
         [width - M.right, HEIGHT - M.bottom],
       ])
+      // Called on drag start, every mouse move during drag, and release
       .on("start brush end", (ev: d3.D3BrushEvent<unknown>) => {
         if (!ev.sourceEvent) return; // ignore programmatic moves
         brushing.current = ev.type !== "end";
+
+        // Selection in PIXELS [left, right]; null if the user clicked without dragging (which clears brush)
         const sel = ev.selection as [number, number] | null;
         if (!sel) {
-          setRange(null);
+          setRange(null); // clear range -> select all
           return;
         }
 
-        // Snap the selection to whole years/months and update the store
-        const a = x.invert(sel[0]);
-        const b = x.invert(sel[1]);
-        let s = interval.floor(a);
-        let e = interval.ceil(b);
-        if (+e <= +s) e = interval.offset(s, 1);
-        s = new Date(Math.max(+s, +model.t0));
-        e = new Date(Math.min(+e, +model.t1));
-        setRange([+s, +e]);
-        if (ev.type === "end") g.call(brush.move, [x(s), x(e)]);
+        // Invert pixel positions to dates
+        const a = xScale.invert(sel[0]);
+        const b = xScale.invert(sel[1]);
+
+        // Snap to nearest whole interval
+        let start =
+          +interval.ceil(a) - +a < +a - +interval.floor(a) // calculate which is closer (floor vs ceil)
+            ? interval.ceil(a)
+            : interval.floor(a);
+        let end =
+          +interval.ceil(b) - +b < +b - +interval.floor(b)
+            ? interval.ceil(b)
+            : interval.floor(b);
+        if (+end <= +start) end = interval.offset(start, 1); // tiny drag selection -> ensure at least one whole interval
+
+        // Clamp to data range
+        start = new Date(Math.max(+start, +model.t0));
+        end = new Date(Math.min(+end, +model.t1));
+
+        // Update store
+        setRange([+start, +end]);
+
+        // On drag release, move visible rectangle to snapped edges
+        if (ev.type === "end") g.call(brush.move, [xScale(start), xScale(end)]);
       });
 
     // Render brush and move it to current selection
     g.call(brush);
     brushBehavior.current = brush;
     const r = useStore.getState().range;
-    g.call(brush.move, r ? [x(r[0]), x(r[1])] : null);
+    g.call(brush.move, r ? [xScale(r[0]), xScale(r[1])] : null);
+
+    // Cleanup: remove brush and event handlers on unmount/dependency change
     return () => {
       brush.on("start brush end", null);
       g.selectAll("*").remove();
       g.on(".brush", null);
       brushBehavior.current = null;
     };
-  }, [model, x, width, snap, setRange]);
+  }, [model, xScale, width, snap, setRange]);
 
   // Keep brush in sync when the range changes from elsewhere (year buttons, keys)
   useEffect(() => {
     const node = brushRef.current;
     const brush = brushBehavior.current;
-    if (!node || !brush || !x || brushing.current) return;
+    if (!node || !brush || !xScale || brushing.current) return;
 
     // Get current and target brush selections in pixels
     const cur = d3.brushSelection(node) as [number, number] | null;
     const target: [number, number] | null = range
-      ? [x(range[0]), x(range[1])]
+      ? [xScale(range[0]), xScale(range[1])]
       : null;
 
     // Return if no current and target selections or they're within 0.5px of each other (avoids infinite loop)
@@ -202,10 +250,11 @@ export function Timeline() {
     )
       return;
     d3.select<SVGGElement, unknown>(node).call(brush.move, target);
-  }, [range, x]);
+  }, [range, xScale]);
 
   // Return early if no data or scales yet
-  if (!model || !x || !y) return <div ref={wrapRef} className="timeline" />;
+  if (!model || !xScale || !yScale)
+    return <div ref={wrapRef} className="timeline" />;
 
   // Helper to check if a bin is fully within the current selection range
   const inRange = (b: Bin) =>
@@ -229,17 +278,17 @@ export function Timeline() {
           ? d3.timeMonth
           : d3.timeWeek;
     const step = e.key === "ArrowLeft" ? -1 : 1;
-    const [s, en] = range ?? [+model.t0, +interval.offset(model.t0, 1)];
-    const ns = interval.offset(new Date(s), step);
-    const ne = interval.offset(new Date(en), step);
-    if (+ns < +model.t0 || +ne > +model.t1) return;
-    setRange([+ns, +ne]);
+    const [start, end] = range ?? [+model.t0, +interval.offset(model.t0, 1)];
+    const newStart = interval.offset(new Date(start), step);
+    const newEnd = interval.offset(new Date(end), step);
+    if (+newStart < +model.t0 || +newEnd > +model.t1) return;
+    setRange([+newStart, +newEnd]);
   };
 
   const onPointerMove = (e: PointerEvent<SVGSVGElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const px = e.clientX - rect.left;
-    const t = x.invert(px);
+    const t = xScale.invert(px);
     const bin = model.months.find((b) => t >= b.start && t < b.end);
     setHover(
       bin && px >= M.left && px <= width - M.right ? { x: px, bin } : null,
@@ -283,7 +332,7 @@ export function Timeline() {
       {/* Timeline chart of number of photos over time */}
       <div
         ref={wrapRef}
-        className="relative w-full rounded-sm outline-none focus-within:ring-2 focus-within:ring-muted"
+        className="relative w-full rounded-sm outline-none"
         tabIndex={0}
         onKeyDown={onKeyDown}
         aria-label="Timeline of photos per month"
@@ -299,21 +348,21 @@ export function Timeline() {
             className="axis-line"
             x1={M.left}
             x2={width - M.right}
-            y1={y(0)}
-            y2={y(0)}
+            y1={yScale(0)}
+            y2={yScale(0)}
           />
           {model.years.map((yr) => (
             <g key={+yr.start}>
               <line
                 className="year-divider"
-                x1={x(yr.start)}
-                x2={x(yr.start)}
+                x1={xScale(yr.start)}
+                x2={xScale(yr.start)}
                 y1={M.top}
                 y2={HEIGHT - M.bottom + 4}
               />
               <text
                 className="axis-label"
-                x={(x(yr.start) + x(yr.end)) / 2}
+                x={(xScale(yr.start) + xScale(yr.end)) / 2}
                 y={HEIGHT - 8}
                 textAnchor="middle"
               >
@@ -321,7 +370,7 @@ export function Timeline() {
               </text>
             </g>
           ))}
-          {y
+          {yScale
             .ticks(3)
             .filter((t) => t > 0 && Number.isInteger(t))
             .map((t) => (
@@ -330,13 +379,13 @@ export function Timeline() {
                   className="grid-line"
                   x1={M.left}
                   x2={width - M.right}
-                  y1={y(t)}
-                  y2={y(t)}
+                  y1={yScale(t)}
+                  y2={yScale(t)}
                 />
                 <text
                   className="axis-label"
                   x={M.left - 6}
-                  y={y(t)}
+                  y={yScale(t)}
                   dy="0.32em"
                   textAnchor="end"
                 >
@@ -344,35 +393,48 @@ export function Timeline() {
                 </text>
               </g>
             ))}
+
           {/* Bars for each month/week */}
           {snap === "week"
             ? model.weeks.map((b) => {
                 if (!b.count) return null;
-                const x0 = x(b.start) + 1;
-                const w = Math.max(1, x(b.end) - x(b.start) - 2); // 2px gap between bars
-                const top = y(b.count);
+                const x0 = xScale(b.start) + 1;
+                const w = Math.max(1, xScale(b.end) - xScale(b.start) - 2); // 2px gap between bars
+                const top = yScale(b.count);
                 return (
                   <path
                     key={+b.start}
                     className={`bar ${inRange(b) ? "bar-on" : "bar-off"} ${
                       hover?.bin === b ? "bar-hover" : ""
                     }`}
-                    d={drawBarSVG(x0, top, w, y(0) - top, Math.min(4, w / 2))}
+                    d={drawBarSVG(
+                      x0,
+                      top,
+                      w,
+                      yScale(0) - top,
+                      Math.min(4, w / 2),
+                    )}
                   />
                 );
               })
             : model.months.map((b) => {
                 if (!b.count) return null;
-                const x0 = x(b.start) + 1;
-                const w = Math.max(1, x(b.end) - x(b.start) - 1); // 1px gap between bars
-                const top = y(b.count);
+                const x0 = xScale(b.start) + 1;
+                const w = Math.max(1, xScale(b.end) - xScale(b.start) - 1); // 1px gap between bars
+                const top = yScale(b.count);
                 return (
                   <path
                     key={+b.start}
                     className={`bar ${inRange(b) ? "bar-on" : "bar-off"} ${
                       hover?.bin === b ? "bar-hover" : ""
                     }`}
-                    d={drawBarSVG(x0, top, w, y(0) - top, Math.min(4, w / 2))}
+                    d={drawBarSVG(
+                      x0,
+                      top,
+                      w,
+                      yScale(0) - top,
+                      Math.min(4, w / 2),
+                    )}
                   />
                 );
               })}
