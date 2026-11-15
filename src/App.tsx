@@ -106,6 +106,7 @@ function Header() {
   );
 }
 
+// Returns human-readable description of date range, e.g. "Jan 2020 – Mar 2021" or "2019–2021" or "all dates"
 function describeRange(range: [number, number] | null): string {
   if (!range) return "all dates";
   const s = new Date(range[0]);

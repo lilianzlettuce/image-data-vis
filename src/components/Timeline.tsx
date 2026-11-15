@@ -1,6 +1,6 @@
 /**
  * Timeline: photos per month as bars, brush snaps to whole years/months
- * Dragging brush updates shared selection live; average view follows it.
+ * Dragging brush updates shared selection live; average view follows it
  *
  * React renders bars and labels; D3 provides scales, time intervals and brush interaction
  */
@@ -27,6 +27,19 @@ interface Bin {
 interface Hover {
   x: number; // pixel position of mouse
   bin: Bin; // hovered month/week bin
+}
+
+/** Get SVG path to draw bar for a bin on the chart
+ *  Rounded top corners, square at the baseline */
+function drawBarSVG(
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number,
+): string {
+  r = Math.max(0, Math.min(r, h));
+  return `M${x},${y + h}V${y + r}Q${x},${y} ${x + r},${y}H${x + w - r}Q${x + w},${y} ${x + w},${y + r}V${y + h}Z`;
 }
 
 export function Timeline() {
@@ -200,7 +213,8 @@ export function Timeline() {
           +interval.ceil(b) - +b < +b - +interval.floor(b)
             ? interval.ceil(b)
             : interval.floor(b);
-        if (+end <= +start) end = interval.offset(start, 1); // tiny drag selection -> ensure at least one whole interval
+        // TODO: bug where it goes to the next interval
+        //if (+end <= +start) end = interval.offset(start, 1); // tiny drag selection -> ensure at least one whole interval
 
         // Clamp to data range
         start = new Date(Math.max(+start, +model.t0));
@@ -214,8 +228,10 @@ export function Timeline() {
       });
 
     // Render brush and move it to current selection
-    g.call(brush);
+    g.call(brush); // d3 create brush's elements inside <g>
     brushBehavior.current = brush;
+
+    // Show current selection
     const r = useStore.getState().range;
     g.call(brush.move, r ? [xScale(r[0]), xScale(r[1])] : null);
 
@@ -235,8 +251,8 @@ export function Timeline() {
     if (!node || !brush || !xScale || brushing.current) return;
 
     // Get current and target brush selections in pixels
-    const cur = d3.brushSelection(node) as [number, number] | null;
-    const target: [number, number] | null = range
+    const cur = d3.brushSelection(node) as [number, number] | null; // where the brush is now (px)
+    const target: [number, number] | null = range // where it should be (px)
       ? [xScale(range[0]), xScale(range[1])]
       : null;
 
@@ -252,21 +268,24 @@ export function Timeline() {
     d3.select<SVGGElement, unknown>(node).call(brush.move, target);
   }, [range, xScale]);
 
-  // Return early if no data or scales yet
+  // Return early if no data or scales yet (still render container so ResizeObserver has something to measure)
   if (!model || !xScale || !yScale)
     return <div ref={wrapRef} className="timeline" />;
 
-  // Helper to check if a bin is fully within the current selection range
+  /* Event handlers and helpers (recreated each render) */
+
+  // Helper to check if a bin is fully within current selection range
   const inRange = (b: Bin) =>
     !range || (+b.start >= range[0] && +b.end <= range[1]);
 
-  // Helper to select a year, optionally extending the current selection
+  // Helper to select a year, optionally extend current selection
   const selectYear = (yr: Bin, extend: boolean) => {
     if (extend && range)
       setRange([Math.min(range[0], +yr.start), Math.max(range[1], +yr.end)]);
     else setRange([+yr.start, +yr.end]);
   };
 
+  // Handle keyboard events: Esc = clear selection, ←/→ = step by one interval
   const onKeyDown = (e: KeyboardEvent) => {
     if (e.key === "Escape") return setRange(null);
     if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
@@ -285,17 +304,22 @@ export function Timeline() {
     setRange([+newStart, +newEnd]);
   };
 
+  /**
+   * Tooltip: find the month under the mouse
+   * Listens on the whole <svg> to avoid getting blocked by brush's invisible overlay
+   * Pointer events from the overlay bubble up to the <svg>
+   */
   const onPointerMove = (e: PointerEvent<SVGSVGElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
-    const px = e.clientX - rect.left;
-    const t = xScale.invert(px);
+    const px = e.clientX - rect.left; // mouse x relative to the chart
+    const t = xScale.invert(px); // ... as a date
     const bin = model.months.find((b) => t >= b.start && t < b.end);
     setHover(
       bin && px >= M.left && px <= width - M.right ? { x: px, bin } : null,
     );
   };
 
-  const fmtMonth = d3.timeFormat("%B %Y");
+  const formatMonth = d3.timeFormat("%B %Y"); // e.g. "March 2023"
   const total = photos.length;
 
   return (
@@ -330,6 +354,7 @@ export function Timeline() {
       </div>
 
       {/* Timeline chart of number of photos over time */}
+      {/* tabIndex makes container focusable so it can receive key presses */}
       <div
         ref={wrapRef}
         className="relative w-full rounded-sm outline-none"
@@ -337,6 +362,8 @@ export function Timeline() {
         onKeyDown={onKeyDown}
         aria-label="Timeline of photos per month"
       >
+        {/* SVG paints later elements on top
+         * Order: baseline, year dividers + labels, gridlines, bars, brush on top */}
         <svg
           width={width}
           height={HEIGHT}
@@ -351,6 +378,7 @@ export function Timeline() {
             y1={yScale(0)}
             y2={yScale(0)}
           />
+          {/* For each year: vertical divider at its start, label centered under its span */}
           {model.years.map((yr) => (
             <g key={+yr.start}>
               <line
@@ -370,6 +398,7 @@ export function Timeline() {
               </text>
             </g>
           ))}
+          {/* Y axis: ~3 "nice" tick values from the scale; faint gridline + label for each */}
           {yScale
             .ticks(3)
             .filter((t) => t > 0 && Number.isInteger(t))
@@ -394,7 +423,7 @@ export function Timeline() {
               </g>
             ))}
 
-          {/* Bars for each month/week */}
+          {/* Bars for each month/week - colored by whether it's selected, highlighted when hovered */}
           {snap === "week"
             ? model.weeks.map((b) => {
                 if (!b.count) return null;
@@ -438,11 +467,14 @@ export function Timeline() {
                   />
                 );
               })}
+          {/* Empty group handed to D3: brush effect fills it. Brush on top of everything to receive mouse. */}
           <g ref={brushRef} className="brush" />
         </svg>
+
+        {/* Tooltip for hovered month */}
         {hover && (
           <div className="tooltip" style={{ left: hover.x }}>
-            <strong>{fmtMonth(hover.bin.start)}</strong>
+            <strong>{formatMonth(hover.bin.start)}</strong>
             <span>
               {hover.bin.count} photo{hover.bin.count === 1 ? "" : "s"}
             </span>
@@ -451,17 +483,4 @@ export function Timeline() {
       </div>
     </div>
   );
-}
-
-/** Get SVG path to draw bar for a bin on the chart
- *  Rounded top corners, square at the baseline */
-function drawBarSVG(
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  r: number,
-): string {
-  r = Math.max(0, Math.min(r, h));
-  return `M${x},${y + h}V${y + r}Q${x},${y} ${x + r},${y}H${x + w - r}Q${x + w},${y} ${x + w},${y + r}V${y + h}Z`;
 }
